@@ -182,8 +182,10 @@ const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTIc0kPdx
 // ── CSV Parser ─────────────────────────────────────────────────────────────
 
 function parseCSV(text) {
+  // strip BOM and normalize line endings
+  const clean = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const rows = [];
-  for (const line of text.split('\n')) {
+  for (const line of clean.split('\n')) {
     if (!line.trim()) continue;
     const cells = [];
     let cell = '', inQuote = false;
