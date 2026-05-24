@@ -176,18 +176,44 @@
 
 <script>
 // ── CONFIG ─────────────────────────────────────────────────────────────────
-// วาง Web App URL จาก Google Apps Script ตรงนี้หลัง deploy
-const APPS_SCRIPT_URL = '';
+// Published CSV URL จาก Google Sheets (File → Share → Publish to web → CSV)
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTIc0kPdxWoyKX-0CoSzAipXZLPW7IqyumcRQDHx63l3VddZoyKqj16bnrT6bNilfHTZ2P5odLQ5AEM/pub?output=csv';
 
-// ── Fallback prices (used when sheet is unreachable) ──────────────────────
-const FALLBACK = {
-  sizes: ['9,000 BTU','12,000 BTU','18,000 BTU','24,000 BTU','36,000 BTU','แอร์แคสเซท','แอร์ตั้งพื้น/ฝังฝ้า'],
-  services: {
-    'ล้างแอร์':    { '9,000 BTU':600,  '12,000 BTU':700,  '18,000 BTU':900,  '24,000 BTU':1100, '36,000 BTU':1400, 'แอร์แคสเซท':1800, 'แอร์ตั้งพื้น/ฝังฝ้า':1600 },
-    'ซ่อมแอร์':   { '9,000 BTU':800,  '12,000 BTU':900,  '18,000 BTU':1100, '24,000 BTU':1300, '36,000 BTU':1600, 'แอร์แคสเซท':2000, 'แอร์ตั้งพื้น/ฝังฝ้า':1800 },
-    'ติดตั้งแอร์': { '9,000 BTU':2500, '12,000 BTU':2800, '18,000 BTU':3500, '24,000 BTU':4200, '36,000 BTU':5500, 'แอร์แคสเซท':7000, 'แอร์ตั้งพื้น/ฝังฝ้า':6500 },
-  },
-};
+// ── CSV Parser ─────────────────────────────────────────────────────────────
+
+function parseCSV(text) {
+  const rows = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const cells = [];
+    let cell = '', inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuote = !inQuote; }
+      else if (ch === ',' && !inQuote) { cells.push(cell.trim()); cell = ''; }
+      else { cell += ch; }
+    }
+    cells.push(cell.trim());
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function buildFromCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error('empty sheet');
+  const sizes    = rows[0].slice(1).filter(Boolean);
+  const services = {};
+  for (let i = 1; i < rows.length; i++) {
+    const name = rows[i][0]?.trim();
+    if (!name) continue;
+    services[name] = {};
+    sizes.forEach((s, j) => {
+      services[name][s] = parseFloat(String(rows[i][j + 1]).replace(/,/g, '')) || 0;
+    });
+  }
+  return { sizes, services };
+}
 
 // ── State ──────────────────────────────────────────────────────────────────
 let PRICES = {};
@@ -224,38 +250,29 @@ function setPriceSourceBadge(text, ok) {
 async function loadPrices() {
   document.getElementById('loadingDate').textContent =
     `วันที่ ${new Date().toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' })}`;
-
-  if (APPS_SCRIPT_URL) {
-    try {
-      const res = await fetch(APPS_SCRIPT_URL);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (!data.sizes || !data.services) throw new Error('invalid format');
-      buildFromData(data);
-      hideWarning();
-      finishInit('live');
-      return;
-    } catch (err) {
-      console.warn('Price fetch failed:', err);
-    }
+  try {
+    const res = await fetch(SHEET_CSV_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const data = buildFromCSV(text);
+    buildFromData(data);
+    hideWarning();
+    finishInit('live');
+  } catch (err) {
+    console.warn('Sheet fetch failed:', err);
+    finishInit('error', err.message);
   }
-
-  // Fallback
-  buildFromData(FALLBACK);
-  finishInit('fallback');
 }
 
-function finishInit(source) {
+function finishInit(source, errMsg) {
   document.getElementById('loadingOverlay').style.display = 'none';
 
   if (source === 'live') {
-    const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setPriceSourceBadge(`ราคาล่าสุดจาก Google Sheet (${now})`, true);
   } else {
-    setPriceSourceBadge('ใช้ราคาเริ่มต้น (ไม่ได้ตั้งค่า Script URL)', false);
-    showWarning(APPS_SCRIPT_URL
-      ? 'โหลดราคาจากชีตไม่สำเร็จ — ใช้ราคาเริ่มต้นแทน'
-      : 'ยังไม่ได้ตั้งค่า APPS_SCRIPT_URL — ระบบใช้ราคาเริ่มต้นแทน กรุณาดู apps-script.gs เพื่อตั้งค่า');
+    setPriceSourceBadge('โหลดราคาจากชีตไม่สำเร็จ', false);
+    showWarning(`ไม่สามารถโหลดราคาจากชีตได้ (${errMsg}) — กรุณา refresh หน้าใหม่`);
   }
 
   const today = new Date();
