@@ -197,8 +197,6 @@ let rowCount = 0;
 
 // ── Price Loading ──────────────────────────────────────────────────────────
 
-const todayKey = () => `ac_prices_${new Date().toISOString().split('T')[0]}`;
-
 function buildFromData(data) {
   SERVICE_TYPES = Object.keys(data.services).map(k => ({ value: k, label: k }));
   AC_SIZES      = data.sizes.map(s => ({ value: s, label: s }));
@@ -209,6 +207,10 @@ function showWarning(msg) {
   const el = document.getElementById('priceWarning');
   document.getElementById('priceWarningText').textContent = msg;
   el.classList.remove('hidden');
+}
+
+function hideWarning() {
+  document.getElementById('priceWarning').classList.add('hidden');
 }
 
 function setPriceSourceBadge(text, ok) {
@@ -223,52 +225,37 @@ async function loadPrices() {
   document.getElementById('loadingDate').textContent =
     `วันที่ ${new Date().toLocaleDateString('th-TH', { year:'numeric', month:'long', day:'numeric' })}`;
 
-  // 1. Check today's cache
-  const cached = localStorage.getItem(todayKey());
-  if (cached) {
-    try {
-      buildFromData(JSON.parse(cached));
-      hideLodingAndInit('cache');
-      return;
-    } catch (_) { localStorage.removeItem(todayKey()); }
-  }
-
-  // 2. Fetch from Apps Script
   if (APPS_SCRIPT_URL) {
-    document.getElementById('loadingText').textContent = 'กำลังโหลดราคาล่าสุดจากชีต…';
     try {
       const res = await fetch(APPS_SCRIPT_URL);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data.sizes || !data.services) throw new Error('invalid format');
-      localStorage.setItem(todayKey(), JSON.stringify(data));
       buildFromData(data);
-      hideLodingAndInit('live');
+      hideWarning();
+      finishInit('live');
       return;
     } catch (err) {
       console.warn('Price fetch failed:', err);
     }
   }
 
-  // 3. Fallback
+  // Fallback
   buildFromData(FALLBACK);
-  hideLodingAndInit('fallback');
+  finishInit('fallback');
 }
 
-function hideLodingAndInit(source) {
+function finishInit(source) {
   document.getElementById('loadingOverlay').style.display = 'none';
 
   if (source === 'live') {
-    setPriceSourceBadge('ราคาล่าสุดจาก Google Sheet วันนี้', true);
-  } else if (source === 'cache') {
-    setPriceSourceBadge('ราคาจาก cache วันนี้ (อ่านแล้ว)', true);
+    const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    setPriceSourceBadge(`ราคาล่าสุดจาก Google Sheet (${now})`, true);
   } else {
     setPriceSourceBadge('ใช้ราคาเริ่มต้น (ไม่ได้ตั้งค่า Script URL)', false);
-    if (!APPS_SCRIPT_URL) {
-      showWarning('ยังไม่ได้ตั้งค่า APPS_SCRIPT_URL — ระบบใช้ราคาเริ่มต้นแทน กรุณาดู apps-script.gs เพื่อตั้งค่า');
-    } else {
-      showWarning('โหลดราคาจากชีตไม่สำเร็จ — ใช้ราคาเริ่มต้นแทน');
-    }
+    showWarning(APPS_SCRIPT_URL
+      ? 'โหลดราคาจากชีตไม่สำเร็จ — ใช้ราคาเริ่มต้นแทน'
+      : 'ยังไม่ได้ตั้งค่า APPS_SCRIPT_URL — ระบบใช้ราคาเริ่มต้นแทน กรุณาดู apps-script.gs เพื่อตั้งค่า');
   }
 
   const today = new Date();
